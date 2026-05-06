@@ -200,4 +200,4 @@ if uploaded_file is not None:
 # FOOTER
 # ---------------------------------------------------
 st.markdown("---")
-st.caption("Built with Streamlit + PyTorch")
+st.caption("Built with Streamlit + PyTorch : )")
