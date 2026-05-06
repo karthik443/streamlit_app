@@ -133,8 +133,9 @@ def show_allergens(allergens):
 # ---------------------------------------------------
 st.title("🍛 ChaatCheck")
 st.caption(
-    "Upload or click a street food image → get prediction, calories & allergens"
+    "Upload or click a street food image → get prediction, calories & allergens. try with <1MB image else will take time to upload"
 )
+
 
 # ---------------------------------------------------
 # MOBILE + DESKTOP IMAGE INPUT
