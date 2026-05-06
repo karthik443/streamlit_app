@@ -1,5 +1,10 @@
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageOps
+import pillow_heif
+
+# Enable HEIC/HEIF support for iPhone photos
+pillow_heif.register_heif_opener()
+
 from model_inference import load_model, predict
 
 # ---------------------------------------------------
@@ -8,16 +13,17 @@ from model_inference import load_model, predict
 st.set_page_config(
     page_title="ChaatCheck",
     page_icon="🍛",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
 # ---------------------------------------------------
-# LOAD MODEL (CACHE FOR SPEED)
+# LOAD MODEL (CACHED)
 # ---------------------------------------------------
 @st.cache_resource
 def get_model():
     model = load_model("food_model.pth")
-    model.eval()   # IMPORTANT: inference mode
+    model.eval()
     return model
 
 model = get_model()
@@ -101,9 +107,10 @@ food_data = {
 }
 
 # ---------------------------------------------------
-# ALLERGEN DISPLAY
+# ALLERGEN BADGES
 # ---------------------------------------------------
 def show_allergens(allergens):
+
     if not allergens:
         st.success("✅ No major allergens")
         return
@@ -111,93 +118,163 @@ def show_allergens(allergens):
     cols = st.columns(len(allergens))
 
     for i, allergen in enumerate(allergens):
+
         if allergen == "gluten":
             cols[i].error("🌾 Gluten")
+
         elif allergen == "dairy":
             cols[i].warning("🥛 Dairy")
+
         elif allergen == "nuts":
             cols[i].info("🥜 Nuts")
+
+        else:
+            cols[i].write(allergen)
 
 # ---------------------------------------------------
 # HEADER
 # ---------------------------------------------------
-st.title("🍛 ChaatCheck")
-st.caption("Upload a street food image → get prediction, calories & allergens")
-
-# ---------------------------------------------------
-# FILE UPLOAD
-# ---------------------------------------------------
-uploaded_file = st.file_uploader(
-    "📤 Upload Food Image",
-    type=["jpg", "jpeg", "png"]
+st.title("🍛 ChaatCheck- street food recognizer")
+st.caption(
+    "Upload or capture a street food image → get prediction, calories & allergens"
 )
 
 # ---------------------------------------------------
-# PREDICTION
+# IMAGE SOURCE SELECTION
+# ---------------------------------------------------
+option = st.radio(
+    "Choose Image Source",
+    ["📤 Upload Image", "📸 Use Camera"],
+    horizontal=True
+)
+
+uploaded_file = None
+
+# ---------------------------------------------------
+# FILE UPLOADER
+# ---------------------------------------------------
+if option == "📤 Upload Image":
+
+    uploaded_file = st.file_uploader(
+        "Upload Food Image",
+        type=["jpg", "jpeg", "png", "heic", "heif"]
+    )
+
+# ---------------------------------------------------
+# CAMERA INPUT
+# ---------------------------------------------------
+else:
+
+    uploaded_file = st.camera_input(
+        "Take a Food Picture"
+    )
+
+# ---------------------------------------------------
+# IMAGE PROCESSING + PREDICTION
 # ---------------------------------------------------
 if uploaded_file is not None:
 
-    # FAST IMAGE LOADING + OPTIMIZATION
-    image = Image.open(uploaded_file)
+    try:
 
-    # Reduce huge mobile image sizes
-    image.thumbnail((512, 512))
+        # -------------------------
+        # OPEN IMAGE
+        # -------------------------
+        image = Image.open(uploaded_file)
 
-    # Convert to RGB
-    image = image.convert("RGB")
+        # -------------------------
+        # FIX MOBILE ROTATION
+        # -------------------------
+        image = ImageOps.exif_transpose(image)
 
-    # Optional: force resize for faster inference
-    # match your training size
-    image = image.resize((224, 224))
+        # -------------------------
+        # CONVERT TO RGB
+        # -------------------------
+        image = image.convert("RGB")
 
-    # PREDICT
-    with st.spinner("🔍 Analyzing food..."):
+        # -------------------------
+        # COMPRESS LARGE MOBILE IMAGES
+        # -------------------------
+        image.thumbnail((512, 512))
 
-        pred, conf = predict(image, model)
+        # -------------------------
+        # MODEL INPUT SIZE
+        # -------------------------
+        model_image = image.resize((224, 224))
 
-    # LAYOUT
-    col1, col2 = st.columns([1, 1])
+        # -------------------------
+        # PREDICTION
+        # -------------------------
+        with st.spinner("🔍 Analyzing food..."):
 
-    # IMAGE
-    with col1:
-        st.image(
-            image,
-            caption="Uploaded Image",
-            use_container_width=True
+            pred, conf = predict(model_image, model)
+
+        # -------------------------
+        # UI LAYOUT
+        # -------------------------
+        col1, col2 = st.columns([1, 1])
+
+        # -------------------------
+        # IMAGE DISPLAY
+        # -------------------------
+        with col1:
+
+            st.image(
+                image,
+                caption="Uploaded Image",
+                use_container_width=True
+            )
+
+        # -------------------------
+        # RESULTS DISPLAY
+        # -------------------------
+        with col2:
+
+            st.subheader(
+                f"🍽 {pred.replace('_', ' ').title()}"
+            )
+
+            st.progress(
+                min(int(conf * 100), 100)
+            )
+
+            st.write(
+                f"### Confidence: {conf * 100:.2f}%"
+            )
+
+            info = food_data.get(pred)
+
+            if info:
+
+                st.write(
+                    f"🔥 Calories: {info['calories']} kcal"
+                )
+
+                st.write(
+                    f"🥗 Diet Type: **{info['diet'].upper()}**"
+                )
+
+                st.write("### ⚠ Allergens")
+                show_allergens(info["allergens"])
+
+                st.write("### 🧾 Ingredients")
+
+                st.write(
+                    ", ".join(info["ingredients"])
+                )
+
+            else:
+                st.warning(
+                    "No metadata available for this item."
+                )
+
+    except Exception as e:
+
+        st.error(
+            f"❌ Error processing image: {e}"
         )
-
-    # RESULTS
-    with col2:
-
-        st.subheader(f"🍽 {pred.replace('_', ' ').title()}")
-
-        st.progress(min(int(conf * 100), 100))
-
-        st.write(f"### Confidence: {conf * 100:.2f}%")
-
-        info = food_data.get(pred)
-
-        if info:
-
-            st.write(
-                f"🔥 Calories: {info['calories']} kcal (per serving)"
-            )
-
-            st.write(
-                f"🥗 Diet Type: **{info['diet'].upper()}**"
-            )
-
-            st.write("### ⚠ Allergens")
-            show_allergens(info["allergens"])
-
-            st.write("### 🧾 Ingredients")
-            st.write(", ".join(info["ingredients"]))
-
-        else:
-            st.warning("No metadata available for this food item.")
 
 # ---------------------------------------------------
 # FOOTER
 # ---------------------------------------------------
 st.markdown("---")
-st.caption("Built with Streamlit + PyTorch : )")
+st.caption("Built with Streamlit + PyTorch")
